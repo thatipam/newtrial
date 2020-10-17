@@ -1,0 +1,285 @@
+---
+title: "RMSE-Analysis"
+author: "Mruthyum J Thatipamala"
+date: "September 18, 2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+**Step1: Clean up heap memory - Optimizing memory**
+```{r cleanup, echo=TRUE}
+# Clear environment
+rm(list = ls())
+# Clear console
+cat("\014")
+# Clear plots
+if(!is.null(dev.list())) dev.off()
+```
+
+**Step2: Installing packages and loading libraries**
+```{r packages&libraries, message=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+#if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+#if(!require(magrittr)) install.packages("magrittr", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+
+
+library(caret)
+library(tidyverse)
+#library(magrittr)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(rmarkdown)
+```
+**Step3: reading the smaller edx an validation data from CSV files and saving them to dataframes. Merging them into one dataframe using rbind function**
+```{r reading csv files and binding the data into one single set and memory management using rm()}
+newtrialset1 <- read.csv(file = "newtrialset1.csv", head = TRUE, sep="\t")
+newtrialset2 <- read.csv(file = "newtrialset2.csv", head = TRUE, sep="\t")
+newtrialset3 <- read.csv(file = "newtrialset3.csv", head = TRUE, sep="\t")
+newtrialset4 <- read.csv(file = "newtrialset4.csv", head = TRUE, sep="\t")
+newtrialset5 <- read.csv(file = "newtrialset5.csv", head = TRUE, sep="\t")
+
+
+
+newvalidation1 <- read.csv(file = "newvalidation1.csv", head = TRUE, sep="\t")
+newvalidation2 <- read.csv(file = "newvalidation2.csv", head = TRUE, sep="\t")
+newvalidation3 <- read.csv(file = "newvalidation3.csv", head = TRUE, sep="\t")
+
+trialset <- rbind(newtrialset1, newtrialset2, newtrialset3, newtrialset4, newtrialset5)
+rm(list = c("newtrialset1", "newtrialset2", "newtrialset3", "newtrialset4", "newtrialset5"))
+
+validation <- rbind(newvalidation1, newvalidation2, newvalidation3)
+rm(list = c("newvalidation1", "newvalidation2", "newvalidation3"))
+```
+
+
+**Step4: It is observed from the data that movies belonging some genres are watched more and ratings are also higher. On contrary some genres are watched less and rating are also low.**
+```{r plotting high average ratings,echo=TRUE}
+high_boxplot_genres_rating <- trialset %>% filter(genres %in% c("Drama", "Comedy", "Comedy|Romance", "Comedy|Drama", "Comedy|Drama|Romance", "Drama|Romance")) %>% select(genres, rating)
+str(high_boxplot_genres_rating)
+head(high_boxplot_genres_rating)
+mean(high_boxplot_genres_rating$rating)
+high_boxplot_genres_rating$genres <- factor(high_boxplot_genres_rating$genres, levels = c("Drama", "Comedy", "Comedy|Romance", "Comedy|Drama", "Comedy|Drama|Romance", "Drama|Romance"), labels = c("Dr", "Co", "CoRo", "CoDr", "CoDrRo", "DrRo"))
+
+boxplot(rating ~ genres, data = high_boxplot_genres_rating, xlab = "Genre", ylab = "Rating", main = "High Power Genres")
+
+# Clear plot
+if(!is.null(dev.list())) dev.off()
+```
+```{r plotting low average ratings,echo=TRUE}
+low_boxplot_genres_rating <- trialset %>% filter(genres %in% c("Action|Drama|Horror|Sci-Fi", "Action|Romance|Western", "Adventure|Comedy|Drama|Fantasy|Mystery|Sci-Fi", "Adventure|Crime|Horror|Thriller", "Adventure|Fantasy|Film-Noir|Mystery|Sci-Fi", "Adventure|Horror|Romance|Sci-Fi")) %>% select(genres, rating)
+str(low_boxplot_genres_rating)
+head(low_boxplot_genres_rating)
+mean(low_boxplot_genres_rating$rating)
+low_boxplot_genres_rating$genres <- factor(low_boxplot_genres_rating$genres, levels = c("Action|Drama|Horror|Sci-Fi", "Action|Romance|Western", "Adventure|Comedy|Drama|Fantasy|Mystery|Sci-Fi", "Adventure|Crime|Horror|Thriller", "Adventure|Fantasy|Film-Noir|Mystery|Sci-Fi"), labels = c("ADHSF", "ARW", "ACDFMSF", "ACHT", "AFMNMSF"))
+
+boxplot(rating ~ genres, data = low_boxplot_genres_rating, xlab = "Genre", ylab = "Rating", main = "Low Power Genres")
+# Clear plot
+if(!is.null(dev.list())) dev.off()
+```
+**Step5:Defining RMSE function**
+```{r Global RMSE function}
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+**Step6:Instead of taking the mean of entire dataset, we take the lower end, add increments to reach upper end to calculate the lowest naive rmse and its 'mu'. This a similar to weighted or average distribution analysis**
+```{r naive rmse calculation with low to upper range of ratings,echo=TRUE}
+lambdas <- seq(mean(low_boxplot_genres_rating$rating)+0.5, mean(high_boxplot_genres_rating$rating)+0.5, 0.01)
+
+rm(list = c("high_boxplot_genres_rating", "low_boxplot_genres_rating"))
+
+naive_rmses <- sapply(lambdas, function(l){
+  return(RMSE(validation$rating,l))
+})
+
+qplot(lambdas, naive_rmses)
+# Clear plots
+if(!is.null(dev.list())) dev.off()
+
+mu <- lambdas[which.min(naive_rmses)]
+mu
+
+rm(list = c("lambdas", "naive_rmses"))
+```
+
+**Step6: Movie bias**
+```{r Calculating movie bias, echo=TRUE}
+movie_avgs <- trialset %>%
+  group_by(movieId) %>%
+  summarize(b_i = mean(rating - mu))
+
+movieset <- read.csv(file = "movieset.csv", head = TRUE, sep="\t")
+
+predicted_ratings <- mu + movieset %>% left_join(movie_avgs, by='movieId') %>% pull(b_i)
+
+predicted_ratings <- predicted_ratings %>% replace_na(mu)
+
+RMSE(predicted_ratings, movieset$rating)
+rm(list = c("predicted_ratings", "movieset"))
+```
+
+**Step7: User bias**
+```{r Calculating user bias, echo=TRUE}
+user_avgs <- trialset %>%
+  left_join(movie_avgs, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+
+userset <- read.csv(file = "userset.csv", head = TRUE, sep="\t")
+
+predicted_ratings <- userset %>%
+  left_join(movie_avgs, by='movieId')
+
+predicted_ratings <- predicted_ratings %>%
+  left_join(user_avgs, by='userId') %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  pull(pred)
+
+predicted_ratings <- predicted_ratings %>% replace_na(mu)
+
+RMSE(predicted_ratings, userset$rating)
+rm(list = c("predicted_ratings", "userset"))
+```
+**Step7: genres bias**
+```{r Calculating genres bias, echo=TRUE}
+genres_avgs <- trialset %>% 
+  left_join(movie_avgs, by='movieId')
+
+genres_avgs <- genres_avgs %>%
+  left_join(user_avgs, by='userId') %>%
+  group_by(genres) %>%
+  summarize(b_g = mean(rating - mu - b_i - b_u))
+genresset <- read.csv(file = "genresset.csv", head = TRUE, sep="\t")
+
+predicted_ratings <- genresset %>%
+  left_join(movie_avgs, by='movieId')
+  
+predicted_ratings <- predicted_ratings %>%
+  left_join(user_avgs, by='userId')
+  
+predicted_ratings <- predicted_ratings %>% 
+  left_join(genres_avgs, by='genres')
+
+predicted_ratings <- predicted_ratings %>%
+  mutate(pred = mu + b_i + b_u + b_g)
+
+predicted_ratings <- predicted_ratings %>% pull(pred)
+predicted_ratings <- predicted_ratings %>% replace_na(mu)
+print("here12")
+RMSE(predicted_ratings, genresset$rating)
+rm(list = c("predicted_ratings", "genresset"))
+```
+**Step8: time bias**
+```{r Calculating time bias, echo=TRUE}
+trialset %>% group_by(day_of_week) %>% summarize(total = n(), ave = mean(rating)) %>% ggplot(aes(x=day_of_week, y=ave, fill=day_of_week)) + geom_bar(stat="identity")
+# Clear plots
+if(!is.null(dev.list())) dev.off()
+
+time_avgs <- trialset %>% 
+  left_join(movie_avgs, by='movieId')
+
+time_avgs <- time_avgs %>% 
+  left_join(user_avgs, by='userId')
+
+time_avgs <- time_avgs %>% 
+  left_join(genres_avgs, by='genres')
+
+print("here1")
+
+time_avgs <- time_avgs %>%
+  group_by(day_of_week) %>%
+  summarize(b_d = mean(rating - mu - b_i - b_u - b_g))
+
+print("here2")
+
+timeset <- read.csv(file = "timeset.csv", head = TRUE, sep="\t")
+
+predicted_ratings <- timeset %>%
+  left_join(movie_avgs, by='movieId') 
+
+predicted_ratings <- predicted_ratings %>%
+  left_join(user_avgs, by='userId') 
+
+predicted_ratings <- predicted_ratings %>%
+  left_join(genres_avgs, by='genres')
+print("here3")
+predicted_ratings <- predicted_ratings %>%
+  left_join(time_avgs, by='day_of_week')
+print("here4")
+predicted_ratings <- predicted_ratings %>%
+  mutate(pred = mu + b_i + b_u + b_g + b_d)
+print("here5")
+predicted_ratings <- predicted_ratings %>% pull(pred)
+
+predicted_ratings <- predicted_ratings %>% replace_na(mu)
+
+RMSE(predicted_ratings, timeset$rating)
+
+rm(list = c("predicted_ratings", "timeset"))
+```
+**Final Step: RMSE against validation set**
+```{r Calculating RMSE validation set, echo=TRUE}
+#lambdas <- seq(4.8, 4.8, 0.2)
+#rmses <- sapply(lambdas, function(l){
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+library(dplyr)
+l <- 4.8
+b_i <- trialset %>% group_by(movieId) 
+b_i <- b_i %>% summarize(b_i = sum(rating - mu)/(n()+l))
+
+b_u <- trialset %>% left_join(b_i, by="movieId")
+b_u <- b_u %>% group_by(userId)
+b_u <- b_u %>% 
+  summarize(b_u = sum(rating - b_i - mu)/(n()+l))
+
+b_g <- trialset %>% 
+  left_join(movie_avgs, by='movieId')
+b_g <- b_g %>% left_join(user_avgs, by='userId') 
+b_g <- b_g %>%
+  group_by(genres) 
+b_g <- b_g %>%
+  summarize(b_g = sum(rating - mu - b_i - b_u)/(n()+l))
+
+b_d <- trialset %>% 
+  left_join(movie_avgs, by='movieId') 
+b_d <- b_d %>%
+  left_join(user_avgs, by='userId')
+b_d <- b_d %>%
+  left_join(genres_avgs, by='genres')
+b_d <- b_d %>%
+  group_by(day_of_week)
+b_d <- b_d %>%
+  summarize(b_d = sum(rating - mu - b_i - b_u - b_g)/(n()+l))
+
+rm(list = c("trialset", "movie_avgs", "user_avgs", "genres_avgs"))
+
+predicted_ratings <- validation %>%
+  left_join(b_i, by='movieId')
+predicted_ratings <- predicted_ratings %>%
+  left_join(b_u, by='userId')
+predicted_ratings <- predicted_ratings %>%
+  left_join(b_g, by='genres') 
+predicted_ratings <- predicted_ratings %>%
+  left_join(b_d, by='day_of_week')
+predicted_ratings <- predicted_ratings %>%
+  mutate(pred = mu + b_i + b_u + b_g + b_d)
+predicted_ratings <- predicted_ratings %>% pull(pred)
+
+predicted_ratings <- predicted_ratings %>% replace_na(mu)
+
+RMSE(predicted_ratings, validation$rating)  
+
+# return(RMSE(predicted_ratings, validation$rating))  
+#})
+```
+
