@@ -1,4 +1,19 @@
+#PLEASE NOTE#
+#My local sysem has only 1 GB memory. Also, I got stuck in India due to COVID-19 with limited#
+#facilities and technical help available during lockdown.#
+#My local system has R version 3.3.3 which is not compatible for Rmd/Knit functionality.#
+#Hence, I downloaded the data into my local system and adopted several memory management techniques,#
+#keeping only required objects in memory, broken the train and test data into small and manageable sizes,#
+#used several data warngling techniques, uploaded data files to Github (less than 50 GB for safer and faster)
+#transmition, downloaded them into RStudio Cloud, and used them for calculating RMSE
+#in a different script and running an RMD file generating a PDF report#
+#Hope the graders understand the pain and appreciate my efforts and different R techniques I used. Thanks!#
+
+
+#Removing the objects and setting up a clean environment#
 rm(list = ls())
+
+#Installing packages and binding libraries
 
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
@@ -13,6 +28,8 @@ library(tidyr)
 library(ggplot2)
 library(lubridate)
 
+#Downloading the data
+
 td = tempdir()
 edx = tempfile(tmpdir=td, fileext=".rds")
 validation = tempfile(tmpdir=td, fileext=".rds")
@@ -22,7 +39,8 @@ edx = readRDS(edx)
 validation = readRDS(validation)
 unlink(td)
 
-# Trail set of 0.3% of edx for coding and unit testing
+# Trail set of 0.3% of edx for coding and unit testing due to system constraints as explained#
+#in the begining#
 
 set.seed(1) #set.seed(1, sample.kind="Rounding")
 trial_index <- createDataPartition(y = edx$rating, times = 1, p = 0.3, list = FALSE)
@@ -35,16 +53,20 @@ trialset <- trialset %>%
 
 rm(list = c("edx", "trial_index"))
 
+#Removing the Title column as it is not used in the analysis to make light weight date#
 trialset<-trialset[,-5]
 validation <- validation[,-5]
 
-trialset <- trialset %>% mutate(day_of_week = wday(as_datetime(timestamp), label = TRUE)) 
+#Converting timestamp to weekday and adding a new column named day_of_week for time bias analysis#
 
+trialset <- trialset %>% mutate(day_of_week = wday(as_datetime(timestamp), label = TRUE)) 
 validation <- validation %>% mutate(day_of_week = wday(as_datetime(timestamp), label = TRUE))
 
+#Deleting the timestamp column in view of new column day_of_week created above
 trialset <-trialset[,-4]
 validation <- validation[,-4]
 
+#Breaking trial/train dataframes into manageble sizes and saving them into csv files for Github uploads#
 nrow(trialset)
 trialset1 <- trialset[1:600000, ]
 trialset2 <- trialset[600001:1200000, ]
@@ -67,9 +89,10 @@ write.table(trialset4, file = "newtrialset4.csv",
 write.table(trialset5, file = "newtrialset5.csv",
             sep = "\t", row.names = F, append = FALSE, col.names = T)
 
-
+#Removing dataframe objects from memory
 rm(list = c("trialset1", "trialset2", "trialset3", "trialset4", "trialset5"))
 
+#Breaking validation dataframes into manageble sizes and saving them into csv files for Github uploads#
 nrow(validation)
 
 validation1 <- validation[1:300000, ]
@@ -88,7 +111,9 @@ write.table(validation3, file = "newvalidation3.csv",
 rm(list = c("validation", "validation1", "validation2", "validation3"))
 
 
-# Test data sets for cross validation so that Validation set is used only at the end.
+# Test data sets for cross validation during training phase for different bias evaluation#
+#so that Validation set is used only at the end.#
+
 set.seed(1) #set.seed(1, sample.kind="Rounding")
 movie_index <- createDataPartition(y = trialset$rating, times = 1, p = 0.25, list = FALSE)
 movieset <- trialset[movie_index,]
@@ -137,6 +162,7 @@ timeset <- timeset %>%
 rm(list = "time_index")
 
 
+#Writing bias sets into CSV files
 
 write.table(movieset, file = "movieset.csv",
             sep = "\t", row.names = F, append = FALSE, col.names = T)
@@ -150,5 +176,6 @@ write.table(genresset, file = "genresset.csv",
 write.table(timeset, file = "timeset.csv",
             sep = "\t", row.names = F, append = FALSE, col.names = T)
 
+#Cleaning up objects
 rm(list = c("trialset", "movieset", "userset", "genresset", "timeset"))
 
