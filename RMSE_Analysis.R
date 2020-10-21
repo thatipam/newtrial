@@ -17,7 +17,7 @@ if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.
 library(caret)
 library(magrittr)
 library(dplyr)
-library(tidy)
+library(tidyverse)
 library(ggplot2)
 library(lubridate)
 
@@ -67,7 +67,7 @@ RMSE <- function(true_ratings, predicted_ratings){
 }
 
 
-lambdas <- seq(mean(low_boxplot_genres_rating$rating)+0.5, mean(high_boxplot_genres_rating$rating)+0.5, 0.01)
+lambdas <- seq(mean(low_boxplot_genres_rating$rating), mean(high_boxplot_genres_rating$rating)+0.5, 0.01)
 
 rm(list = c("high_boxplot_genres_rating", "low_boxplot_genres_rating"))
 
@@ -82,6 +82,8 @@ if(!is.null(dev.list())) dev.off()
 mu <- lambdas[which.min(naive_rmses)]
 mu
 
+rmse_results <- tibble(method = "naive", RMSE = min(naive_rmses))
+
 rm(list = c("lambdas", "naive_rmses"))
 
 movie_avgs <- trialset %>%
@@ -94,7 +96,10 @@ predicted_ratings <- mu + movieset %>% left_join(movie_avgs, by='movieId') %>% p
 
 predicted_ratings <- predicted_ratings %>% replace_na(mu)
 
-RMSE(predicted_ratings, movieset$rating)
+movie_rmse <- RMSE(predicted_ratings, movieset$rating)
+movie_rmse
+rmse_results <- rmse_results %>% add_row(method = "movie", RMSE = movie_rmse)
+
 rm(list = c("predicted_ratings", "movieset"))
 
 user_avgs <- trialset %>%
@@ -105,23 +110,21 @@ user_avgs <- trialset %>%
 userset <- read.csv(file = "userset.csv", head = TRUE, sep="\t")
 
 predicted_ratings <- userset %>%
-  left_join(movie_avgs, by='movieId')
-
-predicted_ratings <- predicted_ratings %>%
+  left_join(movie_avgs, by='movieId') %>%
   left_join(user_avgs, by='userId') %>%
   mutate(pred = mu + b_i + b_u) %>%
   pull(pred)
 
 predicted_ratings <- predicted_ratings %>% replace_na(mu)
 
-RMSE(predicted_ratings, userset$rating)
+user_rmse <- RMSE(predicted_ratings, userset$rating)
+user_rmse
+rmse_results <- rmse_results %>% add_row(method = "user", RMSE = user_rmse)
 
 rm(list = c("predicted_ratings", "userset"))
 
 genres_avgs <- trialset %>% 
-  left_join(movie_avgs, by='movieId')
-
-genres_avgs <- genres_avgs %>%
+  left_join(movie_avgs, by='movieId') %>%
   left_join(user_avgs, by='userId') %>%
   group_by(genres) %>%
   summarize(b_g = mean(rating - mu - b_i - b_u))
@@ -129,21 +132,16 @@ genres_avgs <- genres_avgs %>%
 genresset <- read.csv(file = "genresset.csv", head = TRUE, sep="\t")
 
 predicted_ratings <- genresset %>%
-  left_join(movie_avgs, by='movieId')
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>% 
+  left_join(genres_avgs, by='genres') %>%
+  mutate(pred = mu + b_i + b_u + b_g) %>% pull(pred)
 
-predicted_ratings <- predicted_ratings %>%
-  left_join(user_avgs, by='userId')
-
-predicted_ratings <- predicted_ratings %>% 
-  left_join(genres_avgs, by='genres')
-
-predicted_ratings <- predicted_ratings %>%
-  mutate(pred = mu + b_i + b_u + b_g)
-
-predicted_ratings <- predicted_ratings %>% pull(pred)
 predicted_ratings <- predicted_ratings %>% replace_na(mu)
 
-RMSE(predicted_ratings, genresset$rating)
+genre_rmse <- RMSE(predicted_ratings, genresset$rating)
+genre_rmse
+rmse_results <- rmse_results %>% add_row(method = "genre", RMSE = genre_rmse)
 
 rm(list = c("predicted_ratings", "genresset"))
 
@@ -152,90 +150,61 @@ trialset %>% group_by(day_of_week) %>% summarize(total = n(), ave = mean(rating)
 if(!is.null(dev.list())) dev.off()
 
 time_avgs <- trialset %>% 
-  left_join(movie_avgs, by='movieId')
-
-time_avgs <- time_avgs %>% 
-  left_join(user_avgs, by='userId')
-
-time_avgs <- time_avgs %>% 
-  left_join(genres_avgs, by='genres')
-
-time_avgs <- time_avgs %>%
+  left_join(movie_avgs, by='movieId') %>% 
+  left_join(user_avgs, by='userId') %>% 
+  left_join(genres_avgs, by='genres') %>%
   group_by(day_of_week) %>%
   summarize(b_d = mean(rating - mu - b_i - b_u - b_g))
 
 timeset <- read.csv(file = "timeset.csv", head = TRUE, sep="\t")
 
 predicted_ratings <- timeset %>%
-  left_join(movie_avgs, by='movieId') 
-
-predicted_ratings <- predicted_ratings %>%
-  left_join(user_avgs, by='userId') 
-
-predicted_ratings <- predicted_ratings %>%
-  left_join(genres_avgs, by='genres')
-
-predicted_ratings <- predicted_ratings %>%
-  left_join(time_avgs, by='day_of_week')
-
-predicted_ratings <- predicted_ratings %>%
-  mutate(pred = mu + b_i + b_u + b_g + b_d)
-
-predicted_ratings <- predicted_ratings %>% pull(pred)
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  left_join(genres_avgs, by='genres') %>%
+  left_join(time_avgs, by='day_of_week') %>%
+  mutate(pred = mu + b_i + b_u + b_g + b_d) %>%pull(pred)
 
 predicted_ratings <- predicted_ratings %>% replace_na(mu)
 
-RMSE(predicted_ratings, timeset$rating)
-
+time_rmse <- RMSE(predicted_ratings, timeset$rating)
+time_rmse
+rmse_results <- rmse_results %>% add_row(method = "time", RMSE = time_rmse)
 rm(list = c("predicted_ratings", "timeset"))
 
-#lambdas <- seq(4.8, 4.8, 0.2)
-#rmses <- sapply(lambdas, function(l){
-l <- 4.8
-b_i <- trialset %>% group_by(movieId) 
-b_i <- b_i %>% summarize(b_i = sum(rating - mu)/(n()+l))
+lambdas <- seq(3.5, 5.5, 0.25)
+rmses <- sapply(lambdas, function(l){
+b_i <- trialset %>% group_by(movieId) %>% summarize(b_i = sum(rating - mu)/(n()+l))
 
-b_u <- trialset %>% left_join(b_i, by="movieId")
-b_u <- b_u %>% group_by(userId)
-b_u <- b_u %>% 
+b_u <- trialset %>% left_join(b_i, by="movieId") %>% group_by(userId) %>% 
   summarize(b_u = sum(rating - b_i - mu)/(n()+l))
 
 b_g <- trialset %>% 
-  left_join(movie_avgs, by='movieId')
-b_g <- b_g %>% left_join(user_avgs, by='userId') 
-b_g <- b_g %>%
-  group_by(genres) 
-b_g <- b_g %>%
+  left_join(movie_avgs, by='movieId') %>% left_join(user_avgs, by='userId') %>%
+  group_by(genres) %>%
   summarize(b_g = sum(rating - mu - b_i - b_u)/(n()+l))
 
 b_d <- trialset %>% 
-  left_join(movie_avgs, by='movieId') 
-b_d <- b_d %>%
-  left_join(user_avgs, by='userId')
-b_d <- b_d %>%
-  left_join(genres_avgs, by='genres')
-b_d <- b_d %>%
-  group_by(day_of_week)
-b_d <- b_d %>%
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  left_join(genres_avgs, by='genres') %>%
+  group_by(day_of_week) %>%
   summarize(b_d = sum(rating - mu - b_i - b_u - b_g)/(n()+l))
 
 rm(list = c("trialset", "movie_avgs", "user_avgs", "genres_avgs"))
 
 predicted_ratings <- validation %>%
-  left_join(b_i, by='movieId')
-predicted_ratings <- predicted_ratings %>%
-  left_join(b_u, by='userId')
-predicted_ratings <- predicted_ratings %>%
-  left_join(b_g, by='genres') 
-predicted_ratings <- predicted_ratings %>%
-  left_join(b_d, by='day_of_week')
-predicted_ratings <- predicted_ratings %>%
-  mutate(pred = mu + b_i + b_u + b_g + b_d)
-predicted_ratings <- predicted_ratings %>% pull(pred)
+  left_join(b_i, by='movieId') %>%
+  left_join(b_u, by='userId') %>%
+  left_join(b_g, by='genres') %>%
+  left_join(b_d, by='day_of_week') %>%
+  mutate(pred = mu + b_i + b_u + b_g + b_d) %>% pull(pred)
 
 predicted_ratings <- predicted_ratings %>% replace_na(mu)
 
 RMSE(predicted_ratings, validation$rating)  
-
-# return(RMSE(predicted_ratings, validation$rating))  
-#})
+ return(RMSE(predicted_ratings, validation$rating))  
+})
+rmse_results
+rmse_results$method <- factor(rmse_results$method, levels = rmse_results$method[order(rmse_results$RMSE)])
+rmse_results %>% ggplot(aes(x=method, y=RMSE)) + geom_point(colour = 'red', size = 2)

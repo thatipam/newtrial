@@ -1,7 +1,7 @@
 ---
-title: "RMSE-Analysis"
+title: "MovieLens Project - RMSE-Analysis"
 author: "Mruthyum J Thatipamala"
-date: "September 18, 2020"
+date: "`r Sys.Date()`"
 output: pdf_document
 ---
 
@@ -9,6 +9,36 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+-------------------------------------------Begin Report-----------------------------------------
+
+**1. Introduction/Overview/Executive summary:**
+The goal of movielens project is to simulate and develop a movie recommendation system to give ratings to movies on test data (as if prior ratings are not available) based on ratings available in train data. It is a sort of machine learning challenge project.		
+
+GroupLens research labs generated data with over 20 million ratings for over 27,000 movies by more than 138,000 users. A section of this data, about 9 million records, is provided by edx team in the form of training R data set and validation R data set (.rds). These datasets are downloaded and stored into temporary files. From saved files, corresponding dataframes are created using readRDS function.
+
+An algorithm is developed using the train set to calculate the Residual Mean Square Error (RMSE), similar to standard deviation, is calculated. As a final test to the final algorithm, predict movie ratings in the  set (the final hold-out test set) as if they were unknown. RMSE will be used to evaluate how close your predictions are to the true values in the validation set (the final hold-out test set).
+
+-------------------------------------------****-----------------------------------------------
+
+**2. Methods/Analysis:**
+Data cleaning: Movie title column is not used anywhere at any level of the algorithm. Hence, it is deleted from both train and test sets. Several partitions of train data are created using caret package functions to test the biases within the training phase. It is observed that some of the ratings are blank, those are filled with average value rather than deleting the rows.
+
+***Modelling:*** First model, the simplest model, is developed based on the assumption that same rating is given by all users to all movies, which is the average of the ratings (mu). Then ‘naive rmse’ is calculated using the mu and the actual rating given for each movie. 
+
+It is an interesting observation that users give ratings differently to different movies. Hence, the basic model is augmented by adding movie bias (b_i). The rmse calculated at this level is less than naive rmse. 
+
+From the train data, we can make an observation that ratings given to a movie by different users vary substantially. Hence, a new bais, b_u, is added to the model. 
+
+Also, movies belonging to a particular set of genres are given higher ratings in general compared to other genres that attract lower ratings. Also, rating will also vary (though slightly) on the day of the week. Hence, the RMSE model is augmented by adding genre bias (b_g) and time bias (b_t).
+
+It can be easily observed in the data that some movies belonging to a particular get 100+ ratings whereas there are certain movies which get only one rating. Hence, there will be a huge variation in calculating RMSE. The movie that gets more ratings is estimated correctly. To constrain the effect of sizes (the general idea behind regularization), a range of (3.5, 5.5, 0.25) lambda values are introduced as a part of last modelling.
+
+***Visualization:*** To support key concepts and data observations used in analysis, bar plots, scatter plots, and box plots are used as part of data visualization.
+
+***Insights:*** As the model is improved by incorporating more biases, computed RMSE value has reduced considerably. Also, the bigger the size of train and validation data, the more accurate the rating predictions are. 
+Let us look at the code of Model and RSME Algorithm.
+
+-------------------------------------------****------------------------------------------------
 
 **Step1: Clean up heap memory and plots - Optimizing memory of environment. This happens at several places in the code**
 ```{r cleanup, echo=TRUE}
@@ -24,16 +54,13 @@ if(!is.null(dev.list())) dev.off()
 ```{r packages&libraries, message=FALSE}
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
-#if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
 if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
-#if(!require(magrittr)) install.packages("magrittr", repos = "http://cran.us.r-project.org")
 if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
 
 
 library(caret)
 library(tidyverse)
-#library(magrittr)
 library(dplyr)
 library(ggplot2)
 library(lubridate)
@@ -106,6 +133,8 @@ if(!is.null(dev.list())) dev.off()
 #(Weighted) average of ratings across the train set
 mu <- lambdas[which.min(naive_rmses)]
 mu
+#Storing rmse results for various baises in training set
+rmse_results <- tibble(method = "naive", RMSE = min(naive_rmses))
 rm(list = c("lambdas", "naive_rmses"))
 ```
 
@@ -122,7 +151,9 @@ predicted_ratings <- mu + movieset %>% left_join(movie_avgs, by='movieId') %>% p
 
 predicted_ratings <- predicted_ratings %>% replace_na(mu)
 
-RMSE(predicted_ratings, movieset$rating)
+movie_rmse <- RMSE(predicted_ratings, movieset$rating)
+movie_rmse
+rmse_results <- rmse_results %>% add_row(method = "movie", RMSE = movie_rmse)
 rm(list = c("predicted_ratings", "movieset"))
 ```
 
@@ -144,7 +175,9 @@ predicted_ratings <- userset %>%
 
 predicted_ratings <- predicted_ratings %>% replace_na(mu)
 
-RMSE(predicted_ratings, userset$rating)
+user_rmse <- RMSE(predicted_ratings, userset$rating)
+user_rmse
+rmse_results <- rmse_results %>% add_row(method = "user", RMSE = user_rmse)
 rm(list = c("predicted_ratings", "userset"))
 ```
 **Step7: Genres bias - As calculated and observed in Step4movies belonging some genres are watched more and ratings are also higher. On contrary, some genres are watched less and rating are also low. Inclusion of genre bias**
@@ -166,7 +199,9 @@ predicted_ratings <- genresset %>%
 
 predicted_ratings <- predicted_ratings %>% replace_na(mu)
 
-RMSE(predicted_ratings, genresset$rating)
+genre_rmse <- RMSE(predicted_ratings, genresset$rating)
+genre_rmse
+rmse_results <- rmse_results %>% add_row(method = "genre", RMSE = genre_rmse)
 rm(list = c("predicted_ratings", "genresset"))
 ```
 **Step8: Time bias. How the ratings averages are varying on a day of the week can be observed from the bar charts plotted in the below given code. Though small change, the average of ratings given on Tues/Wed/Thursdays are less compared to other days. Accommodating time/day bias.**
@@ -192,8 +227,9 @@ predicted_ratings <- timeset %>%
   left_join(time_avgs, by='day_of_week') %>%
   mutate(pred = mu + b_i + b_u + b_g + b_d) %>% pull(pred) 
 
-RMSE(predicted_ratings, timeset$rating)
-
+time_rmse <- RMSE(predicted_ratings, timeset$rating)
+time_rmse
+rmse_results <- rmse_results %>% add_row(method = "time", RMSE = time_rmse)
 rm(list = c("predicted_ratings", "timeset"))
 ```
 **Final Step: Putting together all biases together and calculating the RMSE against validation set. This analysis also includes a tuning parameter lambda and use it for cross-validation to accommodate regularization for total variability of effect of sizes.**
@@ -227,9 +263,42 @@ RMSE(predicted_ratings, validation$rating)
  return(RMSE(predicted_ratings, validation$rating))  
 })
 rm(list = c("trialset", "movie_avgs", "user_avgs", "genres_avgs"))
+```
+
+-------------------------------------------****------------------------------------------------
+
+**3. Results:**
+
+***Training Modeling results:***
+
+Scatter plot below shows an improvement in model performance  during training phase. RMSE value is reduced from 1.055+ to 0.8466 as more biases are added to the algorithm.
+
+```{r Plotting baises vs rmse for training set, echo=TRUE}
+rmse_results$method <- factor(rmse_results$method, levels = rmse_results$method[order(rmse_results$RMSE)])
+rmse_results %>% ggplot(aes(x=method, y=RMSE)) + geom_point(colour = 'red', size = 2)
+```
+
+***Model performance:***
+```{r Plotting regularization lambda vs rmse for validation set, echo=TRUE}
+
 qplot(lambdas, rmses)
-# Clear plots
-if(!is.null(dev.list())) dev.off()
 final_rmse <- min(rmses)
 final_rmse
 ```
+The lowest value of RMSE on validation set is 0.87192
+
+-------------------------------------------****------------------------------------------------
+
+**Conclusion:**
+
+***Summary:***
+
+Performance of the model improves as more biases are included in the algorithm. It can be improved further by applying advanced techniques as explained in the following section.
+
+***Limitations and Future work:***
+
+I got stuck in India due to lockdown during COVID-19. There is a big limitation on WiFi speed, and the very low end laptop I had. Hence, I needed to contain very limited data for training the model (2.7 million records as against 9 million records provided). Also, I wish there are more records in the validation set as against 1 million records.
+
+Model can be further improved by applying Matrix factorization, singular value decomposition (SVD), and principal component analysis (PCA).
+
+-------------------------------------------End Report-------------------------------------------
