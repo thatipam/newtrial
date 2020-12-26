@@ -1,0 +1,423 @@
+---
+title: "DYO-Trial"
+author: "Mruthyum J Thatipamala"
+date: "12/26/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+-------------------------------------------Begin Report-----------------------------------------
+
+**1. Introduction/Overview/Executive summary:**
+For DYO project, COVID-19 information of Germany is chosen to simulate the spread of the pandemic, analyze various regression models to fit its progress and predict the future of the disease adopting some machine learning algorithms.
+
+For data purposes, two .csv files, namely "covid_de.csv", and "demographics_de.csv" are downloaded from Kaggle website.
+
+The same can be found at - https://www.kaggle.com/headsortails/covid19-tracking-germany
+
+The dataset "covid_de.csv" provides daily updated number of reported cases & deaths in Germany at state and county level. COVID-19 cases and deaths are provided on daily basis for a period of 282 days starting from March 23, 2019. The data is further fine tuned are at gender and agegroup levels also.
+
+The dataser "demographics_de.csv" provides a general demographic data of Germany at state level. 
+
+Statical analyses conducted, regression models used and predictions algorithms implemented consists starting from linear models to progressing to non-linear models using the train sets and test sets. Results are visualized with appropriate graphs for better understanding of the data trends and outcomes of the analyses. Accuracy is measured for every model in terms of Residual Mean Square Error (RMSE) of actual cases and predicted numbers.
+
+A comparision table is provided towards the end tabulating the accuracy number of each model. Also, some observations made during the analysis and recommendations for future work also documented. 
+
+NOTE: If you closely observe the data the cumulative daily cases are as high as the order 10 to the power of 5. Hence,tTo keep the calculated accuracy number less than 1.0 for better reading and understanding, RMSE is calculated after reducing the actual cases and predicted numbers per 10000 people respectively.
+
+-------------------------------------------****-----------------------------------------------
+
+
+
+-------------------------------------------****------------------------------------------------
+
+**Step1: Clean up heap memory and plots - Optimizing memory of environment. This happens at several places in the code**
+```{r cleanup, echo=TRUE}
+# Clear environment
+rm(list = ls())
+# Clear console
+cat("\014")
+# Clear plots
+if(!is.null(dev.list())) dev.off()
+```
+
+**Step2: Installing packages and loading libraries**
+```{r packages&libraries, message=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+if(!require(e1071)) install.packages("e1071", repos = "http://cran.us.r-project.org")
+
+library(caret)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(randomForest)
+library(rpart)
+```
+
+**Step3: Reading the data from CSV files and saving them to dataframes.**
+```{r reading data from file, echo=TRUE}
+#import data from csv file to a dataframe in Global Environment
+coviddf <- read.csv(file = "covid_de.csv", head = TRUE, sep=",", stringsAsFactors = TRUE)
+demographicsdf <- read.csv(file = "demographics_de.csv", head = TRUE, sep=",", stringsAsFactors = TRUE)
+```
+
+**Step4: First Look at data**
+```{r data descritpion, echo=TRUE}
+#Describe data
+nrow(coviddf)
+names(coviddf)
+head(coviddf)
+str(coviddf)
+
+head(demographicsdf)
+names(demographicsdf)
+str(demographicsdf)
+```
+***Column Descriptions***
+COVID-19 dataset covid_de.csv:
+There are a total of 3000 rows.
+
+state: Name of the German federal state. Germany has 16 federal states.
+county: The name of the German Landkreis (LK) or Stadtkreis (SK), which correspond roughly to US counties.
+age_group: Data is reported at 6 age groups: 0-4, 5-14, 15-34, 35-59, 60-79, and "80-99"
+gender: Reported as male (M) or female (F).
+date: The calendar date of when a case, death and recovery were reported. It is in string format.
+cases: COVID-19 cases that have been confirmed counts per day, not cumulative counts.
+deaths: COVID-19 related deaths, not cumulative counts
+recovered: Recovered cases. Again, not cumulative counts
+
+Demographic dataset demographics_de.csv:
+
+state, gender, age_group: same as above.
+population: Population counts for the respective categories.
+***End of column descriptions***
+
+***Predictive and Responsive variables***
+The outcome we want to predict is daily cumulative cases and
+the features that we will use to predict the outcome are ndays, age group (mid_age) and gender 
+***End of Predicitve and Responsive variables***
+
+**Step3: Data cleaning:**
+Below code finds out the presence of NA values in any of the columns and deletes the corresponding rows.
+```{r data cleansing, echo=TRUE}
+#Check for na, delete rows with na values. Since the values are not cumulative, the overall numbers will be calculated with not null values
+any(is.na(coviddf))
+sum(is.na(coviddf))
+coviddf <- coviddf %>% na.omit()
+```
+
+**Step4: Data wrangling and reshaping the data**
+```{r data modification, echo=TRUE}
+#Converting data from string to date format
+coviddf$date <- as.Date(coviddf$date)
+#Calculating time period in number of days
+#The “Date” class means dates are stored as the number of days since January 1, 1970. The as.numeric function to view the raw values. With dates stored in this fashion we can calculate number of days between two dates.
+
+coviddf <- coviddf %>% mutate(ndays1970 = as.integer(as.ts(date)))
+coviddf <- coviddf %>% mutate(ndays = (ndays1970 - min(ndays1970)))
+
+#Splitting age group into two (lower and upper) ends
+coviddf <- coviddf %>% separate(age_group, c("lowerage", "upperage"))
+
+#Converting age limits from charecter to numeric and calculating midage of the group
+coviddf$lowerage <- as.integer(coviddf$lowerage)
+coviddf$upperage <- as.integer(coviddf$upperage)
+coviddf <- coviddf %>% mutate(mid_age = (lowerage+upperage)/2)
+head(coviddf)
+
+#Removing lower age, upper age and also county from coviddf as demographics are collected at state level in demographicsdf
+coviddf <- coviddf[, c(-2, -3, -4, -10)]
+
+#Rearranging columns so that mid_age_group comes in 2nd column
+coviddf <- coviddf[, c(1,8,2,3,7,4,5,6)]
+
+#Converting mid_age to factor
+coviddf$mid_age = as.factor(coviddf$mid_age)
+
+#Replacing gender column values "female" with "F" and "male" with "M" in demographicsdf to be in sync with coviddf
+demographicsdf$gender[demographicsdf$gender == "female"] <- "F"
+demographicsdf$gender[demographicsdf$gender == "male"] <- "M"
+
+#Summing the population to a single number at country level
+demographicsdf_state_pop <- demographicsdf %>% group_by(state) %>% summarize(total_pop = sum(population))
+country_pop <- sum(demographicsdf_state_pop$total_pop)
+print(country_pop)
+````
+***Note: The cumulative sums of cases, deaths and recoveries will be calculated as per the necessities of models during respective analyses***
+
+***End of note***
+
+**Step5: Data Visualization - To better understand the data in the form of plots and graphs following graphs are drwan**
+
+```{r data visualization, echo=TRUE}
+# State Level Stats and visualization
+coviddf_lab_state_totals <- coviddf %>% group_by(state) %>% summarize(t_c = sum(cases), t_d = sum(deaths), t_r = sum(recovered))
+coviddf_lab_state_cumtotals <- coviddf_lab_state_totals %>% mutate(cum_t_c=cumsum(t_c), cum_t_d=cumsum(t_d), cum_t_r=cumsum(t_r/10000))
+
+ggplot(coviddf_lab_state_totals, aes(x= t_c, y=state)) + 
+  geom_bar(position="stack", stat="identity")
+DF1 <- melt(coviddf_lab_state_totals, id.var="state")
+ggplot(DF1, aes(x = state, y = value, fill = variable)) +
+  geom_bar(stat = "identity") + scale_fill_manual(values=c('blue','red','green')) + geom_density(alpha=0.3) + theme(axis.text.x=element_text(angle =- 90, vjust = 0.5))
+#Country level stats
+coviddf_date_totals <- coviddf %>% group_by(ndays) %>% summarize(t_c=sum(cases), t_d=sum(deaths), t_r=sum(recovered))
+coviddf_date_totals <- coviddf_date_totals %>% mutate(cum_t_c=cumsum(t_c), cum_t_d=cumsum(t_d), cum_t_r=cumsum(t_r))
+
+plot <- ggplot(coviddf_date_totals, aes(x=ndays))
+plot <- plot + geom_line(aes(y=cum_t_c), color="blue", alpha = 1)
+plot <- plot + geom_line(aes(y=cum_t_r), color="green", alpha = 1)
+plot <- plot + geom_line(aes(y=cum_t_d), color="red", alpha = 1)
+plot <- plot + ggtitle("Country Level Total Cases") + ylab("Cases")
+plot <- plot + theme(
+  plot.title = element_text(color="red", size=12, face="bold.italic"),
+  axis.title.y = element_text(size=10, face="bold")
+)
+plot
+
+#Top 3 states - Case Stats Visualization
+coviddf_lab_states_days <- coviddf %>% filter(state %in% c('Nordrhein-Westfalen', 'Bayern', 'Baden-Wuerttemberg')) %>% group_by(state, ndays) %>% summarize(t_c = sum(cases), t_d = sum(deaths), t_r = sum(recovered))
+coviddf_lab_states_cum <- coviddf_lab_states_days %>% mutate(cum_t_c=cumsum(t_c), cum_t_d=cumsum(t_d), cum_t_r=cumsum(t_r))
+
+coviddf_lab_states_cum %>% ggplot(aes(ndays, cum_t_c, group = state)) +
+  geom_line(aes(linetype = state, color = state)) +
+  geom_point(aes(color = state)) +
+  theme(legend.position = "top")
+#Gender Stats and Visualizations
+coviddf_date_gender_totals <- coviddf %>% group_by(date, gender) %>% summarize(t_c=sum(cases), t_d=sum(deaths), t_r=sum(recovered)) %>% ungroup()
+coviddf_date_gender_totals <- coviddf_date_gender_totals %>% group_by(date, gender) %>% mutate(cum_t_c=cumsum(t_c), cum_t_d=cumsum(t_d), cum_t_r=cumsum(t_r))
+
+coviddf_date_gender_totals %>% 
+  ggplot(aes(date, cum_t_c, color=gender)) +
+  geom_line(alpha = 1)
+
+#Gender and Age Stats and Visualizations
+coviddf_age_gender_totals <- coviddf %>% group_by(mid_age, gender) %>% summarize(t_c=sum(cases), t_d=sum(deaths), t_r=sum(recovered))
+coviddf_age_gender_cumtotals <- coviddf_age_gender_totals %>% mutate(cum_t_c=cumsum(t_c), cum_t_d=cumsum(t_d), cum_t_r=cumsum(t_r))
+
+ggplot(coviddf_age_gender_totals, aes(x = mid_age, y = (t_c), fill = gender)) +
+  geom_bar(stat = "identity", position = 'dodge')
+````
+
+***Commentary on visualization:*** 
+It is clear that there is a relation between ndays and cumulative cases. But, state and country level graphs represent that the relationship is not linear. Moreover, the curve also represents higher level order (exponential growth and sigmoidal growth) as applicable in case of infectious diseases. Hence, more complicated non-linear models are needed for regressing this behavior.
+
+Three states dominate and follow the country level spread of COVID-19.
+
+The age group that mostly affected is 35-49.
+
+There is no clear indication that a particular gender is significantly affected compared to other.
+***End of commentary on visualization***
+
+**Step6:Defining RMSE function, a function that computes the RMSE for daily cumulative cases and their corresponding predictors**
+```{r RMSE function}
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+**Ste7: Linear modelling: Though above graphs visually represent that the time series data is close to linear relation, we deduce the same by some linear methods**
+```{r plotting high average ratings,echo=TRUE}
+#Trying a grid plot with geom_smooth feature adding a smoothing line in order to see what the trends look like
+ggplot(coviddf_date_totals, aes(x = ndays, y = cum_t_c)) + 
+  geom_point() +
+  geom_smooth(method = "glm", formula = y~x)
+
+fit_lm <- lm(cum_t_c ~ ndays, data = coviddf_date_totals)
+y_hat <- predict(fit_lm, coviddf_date_totals)
+#Calculate RMSE and insert into a tibble
+rmse_lm <- RMSE((y_hat)/country_pop*10000, (coviddf_date_totals$cum_t_c/country_pop)*10000)
+rmse_table <- tibble(method = "Linear Model", accuracy = rmse_lm)
+
+#Bin smoothing to detect trends in the presence of noisy data. A span of 50 days is used to compute the average of the values within that span. 
+span <- 50
+fit <- with(coviddf_date_totals,
+            ksmooth(ndays, cum_t_c, kernel = "normal", bandwidth = span))
+coviddf_date_totals %>% mutate(smooth = fit$y) %>% ggplot(aes(ndays, cum_t_c)) +
+  geom_point(size = 2, alpha = .5, color = "blue") + geom_line(aes(ndays, smooth), color="red")
+
+rmse1 <- RMSE((fit$y)/country_pop*10000, (coviddf_date_totals$cum_t_c/country_pop)*10000)
+rmse1
+rmse_table %>% add_row(method = "ksmooth", accuracy = rmse1)
+
+#Local Weighted Regression (loess), assumes that data is locally linear. For this purpose a 25 day span used
+span <- 25
+fit <- loess(cum_t_c~ndays, degree=2, span = span, data=coviddf_date_totals)
+coviddf_date_totals %>% mutate(smooth = fit$fitted) %>% ggplot(aes(ndays, cum_t_c)) +
+  geom_point(size =3, alpha = .5, color = "blue") + geom_line(aes(ndays, smooth), color="red")
+
+rmse2 <- RMSE((fit$fitted)/country_pop*10000, (coviddf_date_totals$cum_t_c/country_pop)*10000)
+rmse2
+rmse_table %>% add_row(method = "loess", accuracy = rmse2)
+```
+***Commentary on Linear Regression models***
+The features used above, geom_smooth, 'lm' function, bin smoothing, loess method in linear modelling and RMSE values represent that the trend is not linear and the data can't be fit and modelled realistically using parametric methods and hence, statistical predictions can not be performed with higher accuracy.
+Hence, to progress further, we move to non-linear modelling to decrease the bias. This approach may improve the predictie power.
+***End of commentary on Linear Regression models***
+
+**Step6: We start with non-linear approaches available in liner methods like polynomial regression and knn algorith,**
+```{r non-linear of linear models,echo=TRUE}
+#Polynomial Regression - Extending linear regression model for capturing these nonlinear effects with polynomial term 14
+polyfit2 <- lm(cum_t_c ~ poly(ndays, 14), data=coviddf_date_totals)
+
+ntime <- seq(min(coviddf_date_totals$ndays), max(coviddf_date_totals$ndays), length=225)
+preds <- predict (polyfit2, newdata = list(ndays = ntime), se=TRUE)
+
+ggplot(coviddf_date_totals, aes(ntime, preds$fit)) + geom_line(color="green", alpha = 1)
+
+rmse3 <- RMSE((preds$fit)/country_pop*10000, (coviddf_date_totals$cum_t_c/country_pop)*10000)
+rmse3
+rmse_table %>% add_row(method = "poly-14degree", accuracy = rmse3)
+
+#Knn Algorithm is similar to bin smoothing, but it maximizes accuracy, or minimizes the expected MSE 
+#Splitting the data into training and testing sets using caret library
+set.seed(1, sample.kind="Rounding")
+test_index <- createDataPartition(y = coviddf_date_totals$cum_t_c, times = 1, p = 0.3, list = FALSE)
+testset <- coviddf_date_totals[test_index,]
+trainset <- coviddf_date_totals[-test_index,]
+
+knn_fit <- knn3(cum_t_c ~ ., data = trainset, k=5)
+y_hat_knn <- predict(knn_fit, testset, type = "class")
+rmse4 <- RMSE((y_hat_knn)/country_pop*10000, (testset$cum_t_c/country_pop)*10000)
+rmse4
+rmse_table %>% add_row(method = "knn3", accuracy = rmse4)
+
+#Cross Validaton - Performing 10-fold cross validation on the data using knn classifier for a sequence of k values
+train_knn <- train(cum_t_c ~ ., method = "knn", data = trainset)
+ggplot(train_knn, highlight = TRUE)
+y_hat_knn <- predict(train_knn, testset, type = "raw", na.action = na.pass)
+rmse5 <- RMSE((y_hat_knn)/country_pop*10000, (testset$cum_t_c/country_pop)*10000)
+rmse5
+rmse_table %>% add_row(method = "knn(k=5)", accuracy = rmse5)
+#We want to pick the k that maximizes accuracy, or minimizes the expected MSE  
+control <- trainControl(method = "cv", number = 10, p = .9)
+train_knn_cv <- train(cum_t_c ~ ., method = "knn",
+                      data = trainset,
+                      tuneGrid = data.frame(k = seq(9, 71, 2)),
+                      trControl = control)
+train_knn_cv$bestTune
+ggplot(train_knn, highlight = TRUE)
+
+#The function predict will use this best performing model. Here is the accuracy of the best model when applied to the test set, which we have not used at all yet because the cross validation was done on the training set
+y_hat_knn <- predict(train_knn_cv, testset, type = "raw", na.action = na.pass)
+rmse6 <- RMSE((y_hat_knn)/country_pop*10000, (testset$cum_t_c/country_pop)*10000)
+rmse6
+rmse_table %>% add_row(method = "knn-cross_valid", accuracy = rmse6)
+````
+
+**Step7: Non-linear models Regression Tree and Random forests**
+```{r non-linear models - Regression Tree and Random Forests,echo=TRUE}
+#Random Forests - Since the data represent time series and outcome is continuous, we will use this method
+fit <- randomForest(cum_t_c~ndays, data = trainset, na.action = na.omit)
+y_hat <- predict(fit, testset)
+testset %>% ggplot() +
+  geom_point(aes(ndays, cum_t_c)) +
+  geom_line(aes(ndays, y_hat), col="red")
+
+rmse7 <- RMSE((y_hat/country_pop)*10000, (testset$cum_t_c/country_pop)*10000)
+rmse7
+rmse_table %>% add_row(method = "rforest", accuracy = rmse7)
+
+#Random Forest for sum of top 3 states
+coviddf_lab_states_cum_ndays <- coviddf_lab_states_cum %>% group_by(ndays) %>% summarize(t_c = sum(t_c), t_d = sum(t_d), t_r = sum(t_r), cum_t_c = sum(cum_t_c), cum_t_d = sum(cum_t_d), cum_t_r = sum(cum_t_r))
+
+test_index <- createDataPartition(y = coviddf_lab_states_cum_ndays$cum_t_c, times = 1, p = 0.3, list = FALSE)
+testset <- coviddf_lab_states_cum_ndays[test_index,]
+trainset <- coviddf_lab_states_cum_ndays[-test_index,]
+
+fit3 <- randomForest(cum_t_c~ndays, data = trainset)
+y_hat = predict(fit3, newdata = testset)
+testset %>% ggplot() +
+  geom_point(aes(ndays, cum_t_c)) +
+  geom_line(aes(ndays, y_hat), col="red")
+
+rmse8 <- RMSE((y_hat/country_pop)*10000, (testset$cum_t_c/country_pop)*10000)
+rmse8
+rmse_table %>% add_row(method = "rforest-testset", accuracy = rmse8)
+````
+
+**Step7: Non-linear models Regression Trees**
+```{r Non-linear algorithm - Regression Tree and Random Forests,echo=TRUE}
+#Regression Trees -
+fit4 <- rpart(cum_t_c ~ ndays, data = coviddf_date_totals)
+plot(fit4, cum_t_c = 10, compress = TRUE, uniform = TRUE)
+text(fit4, use.n = FALSE, cex = 0.75)
+
+coviddf_date_totals %>%
+  mutate(y_hat = predict(fit4)) %>% ggplot() +
+  geom_point(aes(ndays, cum_t_c)) + geom_step(aes(ndays, y_hat), col="red")
+
+train_rpart <- train(cum_t_c ~ ndays,
+                     method = "rpart",
+                     tuneGrid = data.frame(cp = seq(0, 0.05, len = 25)), data = coviddf_date_totals)
+
+plot(train_rpart$finalModel, cum_t_c = 10, branch = 1, margin = 0, minbranch = 0.1, compress = TRUE)
+text(train_rpart$finalModel, cex = 0.75, use.n = FALSE)
+
+coviddf_date_totals %>%
+  mutate(y_hat = predict(train_rpart)) %>% ggplot() +
+  geom_point(aes(ndays, cum_t_c)) + geom_step(aes(ndays, y_hat), col="red")
+
+#Gender, mid_age estimates using rpart function and drawring decision trees
+coviddf_ndays_age_gender_totals <- coviddf %>% group_by(ndays, mid_age, gender) %>% summarize(t_c=sum(cases), t_d=sum(deaths), t_r=sum(recovered))
+coviddf_ndays_age_gender_cumtotals <- coviddf_ndays_age_gender_totals %>% mutate(cum_t_c=cumsum(t_c), cum_t_d=cumsum(t_d), cum_t_r=cumsum(t_r))
+coviddf_ndays_age_gender_cumtotals <- coviddf_ndays_age_gender_cumtotals[, c(-4,-5,-6)]
+
+index <- sample(1:nrow(coviddf_ndays_age_gender_cumtotals), nrow(coviddf_ndays_age_gender_cumtotals) *0.8)
+train <- coviddf_ndays_age_gender_cumtotals[index,]
+test <- coviddf_ndays_age_gender_cumtotals[-index,]
+
+fit_tree <- rpart(gender~ ., data = train)
+test$pred <- predict(fit_tree, newdata = test, type="class")
+cm <- confusionMatrix(test$pred, test$gender)
+cm$table
+cm$overall["Accuracy"]
+#It is also important to examine sensitivity and specificity and not just accuracy
+cm$byClass[c("Sensitivity","Specificity", "Prevalence")] #> Sensitivity Specificity Prevalence
+
+
+table(test$gender)
+plot(fit_tree, compress = TRUE, uniform = TRUE)
+text(fit_tree, use.n = FALSE, cex = 0.75)
+
+fit_tree <- rpart(mid_age~ ., data = train)
+test$pred <- predict(fit_tree, newdata = test, type="class")
+cm <- confusionMatrix(test$pred, test$mid_age)
+cm$table
+cm$overall["Accuracy"]
+#It is also important to examine sensitivity and specificity and not just accuracy
+cm$byClass[c("Sensitivity","Specificity", "Prevalence")] #> Sensitivity Specificity Prevalence
+
+table(test$mid_age)
+plot(fit_tree, compress = TRUE, uniform = TRUE)
+text(fit_tree, use.n = FALSE, cex = 0.75)
+```
+
+
+```
+
+***Model performance:***
+```{r Plotting regularization lambda vs rmse for validation set, echo=TRUE}
+rmse_table
+````
+-------------------------------------------****------------------------------------------------
+
+**Conclusion:**
+
+***Summary:***
+
+Performance of the model improves as more biases are included in the algorithm. It can be improved further by applying advanced techniques as explained in the following section.
+
+***Limitations and Future work:***
+
+
+
+-------------------------------------------End Report-------------------------------------------
